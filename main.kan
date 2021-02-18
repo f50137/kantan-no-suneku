@@ -1,13 +1,14 @@
 import "std/io";
 import "sdl";
 import "std/libc" as std;
+import "std/vec";
 
 extern def rand(): i32;
 
-let SCREEN_WIDTH = 1280;
-let SCREEN_HEIGHT = 720;
+let SCREEN_WIDTH = 700;
+let SCREEN_HEIGHT = 700;
 
-let TILE_WIDTH = 20;
+let TILE_WIDTH = 50;
 
 def get_game_width(): i32 {
 	return SCREEN_WIDTH / TILE_WIDTH;
@@ -55,10 +56,10 @@ def get_head_color(): Color_RGBA {
 	return make_color(50, 50, 200, 255);
 }
 
-let FPS = 60.0;
+let FPS = 25.0;
 
 def get_frame_length(): f64 {
-	return (1000.0 / FPS) as f64;
+	return (1000.0 as f64) / (FPS as f64);
 }
 
 type Vec2i struct {
@@ -72,24 +73,23 @@ type Snake_Part struct {
 }
 
 type Game struct {
-	snake: *Snake_Part,
-	snake_size: usize,
+	snake: vec.Vec,
 	end_game: bool,
 	apple_pos: Vec2i,
 	score: u32
 }
 
-def (g: *Game) handle_input(): void {
+def (game: *Game) handle_input(): void {
 	let e: sdl.Event = undefined;
 	
-	let head = g.snake;
+	let head: *Snake_Part = game.snake.get_ptr(0) as *Snake_Part;
 	
 	let new_x = head.vel.x;
 	let new_y = head.vel.y;
 
 	while e.poll() != 0 {
 		if e.common.kind == sdl.EventKind.Quit {
-			g.end_game = true;
+			game.end_game = true;
 			break;
 		}
 		else if e.common.kind == sdl.EventKind.KeyDown {
@@ -128,7 +128,7 @@ def fill_rectangle(renderer: *sdl.Renderer, rectangle: sdl.Rect, color: Color_RG
 }
 
 def update_snake_part_pos(game: *Game, snake_index: usize): void {
-	let part = game.snake + snake_index;
+	let part = game.snake.get_ptr(snake_index) as *Snake_Part;
 
 	part.pos.x += part.vel.x + get_game_width();
 	part.pos.x %= get_game_width();
@@ -138,30 +138,37 @@ def update_snake_part_pos(game: *Game, snake_index: usize): void {
 }
 
 def update_snake_part_vel(game: *Game, snake_index: usize): void {
-	let part = game.snake + snake_index;
+	let part = game.snake.get_ptr(snake_index) as *Snake_Part;
 
 	if snake_index >= 1 {
-		part.vel.x = (game.snake + snake_index - 1).vel.x;
-		part.vel.y = (game.snake + snake_index - 1).vel.y;
+		let pivot_part = game.snake.get_ptr(snake_index - 1) as *Snake_Part;
+		part.vel.x = pivot_part.vel.x;
+		part.vel.y = pivot_part.vel.y;
+		
 
-		if part.pos.x == game.snake.pos.x &&
-			part.pos.y == game.snake.pos.y &&
-			game.snake_size > 2 {
+		let front_part = game.snake.get_ptr(0) as *Snake_Part;
+		if part.pos.x == front_part.pos.x &&
+			part.pos.y == front_part.pos.y &&
+			game.snake.len > 2 {
 			game.end_game = true;
 		}
 	}
 }
 
 def (game: *Game) update() {
-	if game.snake.pos.x == game.apple_pos.x
-		&& game.snake.pos.y == game.apple_pos.y {
-		if game.snake_size < get_max_snake_size() {
-			let end_part = game.snake + game.snake_size - 1;
-			*(game.snake + game.snake_size) = Snake_Part {
+	
+	let head = game.snake.get_ptr(0) as *Snake_Part;
+
+	if head.pos.x == game.apple_pos.x
+		&& head.pos.y == game.apple_pos.y {
+		if game.snake.len < get_max_snake_size() {
+			let end_part = game.snake.get_ptr(game.snake.len - 1) as *Snake_Part;
+			let new_part = Snake_Part {
 				pos: Vec2i {x: end_part.pos.x, y: end_part.pos.y},
 				vel: Vec2i{x: 0, y: 0}
 			};
-			game.snake_size += 1;
+
+			game.snake.push(&new_part as *void);
 		} else {
 			game.end_game = true;
 		}
@@ -173,11 +180,11 @@ def (game: *Game) update() {
 	} 
 	
 
-	for let i = game.snake_size as i32 - 1; i >= 0; i -= 1 {
+	for let i = game.snake.len as i32 - 1; i >= 0; i -= 1 {
 		update_snake_part_pos(game, i as usize);
 	}
 	
-	for let i = game.snake_size as i32 - 1; i >= 0; i -= 1 {
+	for let i = game.snake.len as i32 - 1; i >= 0; i -= 1 {
 		update_snake_part_vel(game, i as usize);
 	}
 
@@ -192,8 +199,10 @@ def draw_snake_part(renderer: *sdl.Renderer, part: *Snake_Part): void {
 def render_game(renderer: *sdl.Renderer, game: *Game) {
 	fill_background(renderer, get_background_color());
 	
-	for let i: usize = 0; i < game.snake_size; i += 1 {
-		draw_snake_part(renderer, game.snake + i);
+
+
+	for let i: usize = 0; i < game.snake.len; i += 1 {
+		draw_snake_part(renderer, game.snake.get_ptr(i) as *Snake_Part);
 	}
 
 	fill_rectangle(renderer,
@@ -206,23 +215,24 @@ def render_game(renderer: *sdl.Renderer, game: *Game) {
 
 def create_game(game: *Game): void {
 	*game = Game{
-		snake: null, 
-		snake_size: 1,
+		snake: vec.create(sizeof Snake_Part), 
 		end_game: false,
 		apple_pos: Vec2i {x: rand() % get_game_width(), y: rand() % get_game_height()},
 		score: 0
 	};
 	
-	game.snake = std.malloc(sizeof Snake_Part * get_max_snake_size()) as *Snake_Part;
 	
-	*game.snake = Snake_Part{
+	let head = Snake_Part{
 		pos: Vec2i{x: get_game_width() / 2, y: get_game_height() / 2},
 		vel: Vec2i{x: 0, y: 0}
 	};
+	
+	game.snake.push(&head as *void);
+
 }
 
 def (game: *Game) free(): void {
-	delete game.snake;
+	game.snake.free();
 }
 
 def main(): i32 {
@@ -236,7 +246,7 @@ def main(): i32 {
 	let window = sdl.create_window(
 		"Kantan no Suneku",
 		sdl.window_centered(), sdl.window_centered(),
-		1280, 720,
+		SCREEN_WIDTH, SCREEN_HEIGHT,
 		sdl.window_shown()	
 	);
 
